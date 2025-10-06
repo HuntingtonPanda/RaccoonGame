@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class MiniGamePopup : MonoBehaviour
 {
@@ -18,8 +20,12 @@ public class MiniGamePopup : MonoBehaviour
     public Image popupBackdropImage;  // Image on MiniGamePopup
     public Image windowBackground;    // Image on Window
 
+    [Header("Summary UI (icon : count)")]
+    public RectTransform summaryListRoot;   // VerticalLayout container under Window
+    public GameObject summaryRowPrefab;     // Prefab with Image (icon) + TMP_Text (count)
+
     bool isOpen;
-    bool lockedForever;               // <<< NEW: once true, Start is permanently disabled
+    bool lockedForever;
 
     void Awake()
     {
@@ -27,11 +33,12 @@ public class MiniGamePopup : MonoBehaviour
         if (windowRoot) windowRoot.SetActive(false);
         if (miniGameRoot) miniGameRoot.SetActive(false);
 
-        startButton.onClick.AddListener(StartMiniGame);
-        closeButton.onClick.AddListener(ClosePopup);
+        if (startButton) startButton.onClick.AddListener(StartMiniGame);
+        if (closeButton) closeButton.onClick.AddListener(ClosePopup);
 
         SetPlayingUI(false);
         ShowLockedUIIfNeeded();
+        ClearSummary();
     }
 
     public void OpenPopup()
@@ -41,20 +48,20 @@ public class MiniGamePopup : MonoBehaviour
 
         if (popupRoot)  popupRoot.SetActive(true);
         if (windowRoot) windowRoot.SetActive(true);
-
-        // Show BG/world only if not locked
         if (miniGameRoot) miniGameRoot.SetActive(!lockedForever);
 
         SetPlayingUI(false);
         ShowLockedUIIfNeeded();
+        ClearSummary();
     }
 
     void StartMiniGame()
     {
-        if (lockedForever) return; // <<< block repeats forever
+        if (lockedForever) return;
 
         if (miniGameRoot) miniGameRoot.SetActive(true);
-        SetPlayingUI(true); // hide Start/Close, dimmer off during play
+        SetPlayingUI(true);
+        ClearSummary();
 
         var mgr = FindObjectOfType<MiniGameManager>();
         if (mgr) mgr.StartRound();
@@ -68,31 +75,33 @@ public class MiniGamePopup : MonoBehaviour
         if (popupRoot)  popupRoot.SetActive(false);
         isOpen = false;
         SetPlayingUI(false);
+        ClearSummary();
     }
 
-    // Called by manager on normal end (if you still use it for any path)
     public void OnGameEnded()
     {
         if (lockedForever) { ShowLockedUIIfNeeded(); return; }
-        SetPlayingUI(false); // default: show Start/Close again (unused once locked)
+        SetPlayingUI(false);
     }
 
-    // ============ NEW: Win / Game Over views (Close-only) ============
-
-    public void ShowWin(int collected, int total)
+    // ---------- End views (Close-only, with summary) ----------
+    public void ShowWinWithSummary(Dictionary<Sprite,int> summary, int collected, int total)
     {
         LockForever();
-        // Manager already set the title text to show the score.
-        // Keep popup visible, world off, only Close:
         FinalizeEndUI();
+        RenderSummary(summary);
     }
 
-    public void ShowGameOver(int collected, int total)
+    public void ShowGameOverWithSummary(Dictionary<Sprite,int> summary, int collected, int total)
     {
         LockForever();
-        // Manager already set the title text to "Game Over — Collected X/Y".
         FinalizeEndUI();
+        RenderSummary(summary);
     }
+
+    // (keep these if other code still calls them)
+    public void ShowWin(int collected, int total)        { LockForever(); FinalizeEndUI(); }
+    public void ShowGameOver(int collected, int total)   { LockForever(); FinalizeEndUI(); }
 
     void FinalizeEndUI()
     {
@@ -100,17 +109,13 @@ public class MiniGamePopup : MonoBehaviour
         if (windowRoot) windowRoot.SetActive(true);
         if (miniGameRoot) miniGameRoot.SetActive(false);
 
-        // Only Close available
         if (startButton) startButton.gameObject.SetActive(false);
         if (closeButton) closeButton.gameObject.SetActive(true);
 
-        // Re-enable dim/background so text is readable
         if (popupBackdropImage) popupBackdropImage.enabled = true;
         if (windowBackground)
         {
-            var c = windowBackground.color;
-            c.a = 0.30f;
-            windowBackground.color = c;
+            var c = windowBackground.color; c.a = 0.30f; windowBackground.color = c;
         }
     }
 
@@ -132,10 +137,8 @@ public class MiniGamePopup : MonoBehaviour
         }
     }
 
-    // Show/hide UI while actively playing
     void SetPlayingUI(bool playing)
     {
-        // If we're locked, Start must stay hidden regardless
         if (!lockedForever && startButton) startButton.gameObject.SetActive(!playing);
         if (closeButton) closeButton.gameObject.SetActive(!playing);
 
@@ -146,5 +149,50 @@ public class MiniGamePopup : MonoBehaviour
             c.a = playing ? 0f : 0.30f;
             windowBackground.color = c;
         }
+
+        if (playing) ClearSummary();
+    }
+
+    // ---------- Summary rendering ----------
+    void RenderSummary(Dictionary<Sprite,int> summary)
+    {
+        if (!summaryListRoot || !summaryRowPrefab)
+        {
+            Debug.LogWarning("[MiniGamePopup] Assign summaryListRoot & summaryRowPrefab to show the summary.");
+            return;
+        }
+
+        ClearSummary();
+        summaryListRoot.gameObject.SetActive(true);
+
+        if (summary == null || summary.Count == 0)
+        {
+            var row = Instantiate(summaryRowPrefab, summaryListRoot);
+            var img = row.GetComponentInChildren<Image>(true);
+            var txt = row.GetComponentInChildren<TMP_Text>(true);
+            if (img) img.enabled = false;
+            if (txt) txt.text = "No items recorded";
+            return;
+        }
+
+        var ordered = new List<KeyValuePair<Sprite,int>>(summary);
+        ordered.Sort((a,b) => b.Value.CompareTo(a.Value));
+
+        foreach (var kv in ordered)
+        {
+            var row = Instantiate(summaryRowPrefab, summaryListRoot);
+            var img = row.GetComponentInChildren<Image>(true);
+            var txt = row.GetComponentInChildren<TMP_Text>(true);
+            if (img) { img.sprite = kv.Key; img.preserveAspect = true; img.enabled = true; }
+            if (txt) txt.text = $"× {kv.Value}";
+        }
+    }
+
+    void ClearSummary()
+    {
+        if (!summaryListRoot) return;
+        for (int i = summaryListRoot.childCount - 1; i >= 0; i--)
+            Destroy(summaryListRoot.GetChild(i).gameObject);
+        summaryListRoot.gameObject.SetActive(false);
     }
 }

@@ -7,37 +7,37 @@ public class MiniGameManager : MonoBehaviour
     public static MiniGameManager Instance { get; private set; }
 
     [Header("UI (TMP under Window)")]
-    public TMP_Text titleText;            // shows status / final score
-    public TMP_Text scoreText;            // "Collected: x / N"
-    public TMP_Text timerText;
+    public TMP_Text titleText;                 // "Trash Collector", "You Win", etc.
+    public TMP_Text scoreText;                 // "Collected: x / N"
+    public TMP_Text timerText;                 // "Time: s"
 
-    [Header("Prefabs (what to spawn)")]
-    public GameObject foodPrefab;
-    public GameObject badPrefab;
-    public GameObject collectiblePrefab;
+    [Header("Prefab Lists")]
+    public List<GameObject> foodPrefabs = new();         // Food variants
+    public List<GameObject> trashPrefabs = new();        // Trash/Bad variants
+    public List<GameObject> collectiblePrefabs = new();  // Collectible variants
 
-    [Header("Spawn Settings")]
-    public int initialItemCount = 12;
-    public BoxCollider2D spawnBounds;
-    public float minSeparation = 0.6f;
+    [Header("Spawn Area")]
+    public BoxCollider2D spawnBounds;     // Box (IsTrigger=ON) where items appear
+    public float minSeparation = 0.6f;    // spacing between items (world units)
     public int maxPlacementTries = 40;
 
-    [Header("Type Weights")]
+    [Header("Spawn Weights (low chance collectibles)")]
     public float foodWeight = 6f;
-    public float badWeight = 3f;
-    public float collectibleWeight = 1f;
+    public float trashWeight = 3f;
+    public float collectibleWeight = 0.6f;   // low, but we'll guarantee ≥1
 
     [Header("Round Rules")]
-    public float timeLimit = 30f;
+    public int initialItemCount = 25;
+    public float timeLimit = 15f;
 
-    [Header("Target Highlight")]
+    [Header("Target Highlight (only one clickable at a time)")]
     public Color targetColor = new Color(1f, 0.92f, 0.3f, 1f);
     public Color normalColor = Color.white;
     public float targetScale = 1.15f;
     public int   targetSortingOrder = 50;
     public int   normalSortingOrder = 0;
 
-    // state
+    // ---- runtime state ----
     int collected;
     float timeLeft;
     bool running;
@@ -46,6 +46,9 @@ public class MiniGameManager : MonoBehaviour
     readonly List<ClickableItem> items = new();
     ClickableItem currentTarget;
 
+    // Summary: how many of each sprite we picked up
+    readonly Dictionary<Sprite, int> collectedBySprite = new();
+
     void Awake() => Instance = this;
 
     void OnEnable()
@@ -53,17 +56,19 @@ public class MiniGameManager : MonoBehaviour
         running = false;
         collected = 0;
         targetCount = 0;
+        collectedBySprite.Clear();
         UpdateUI(0, timeLimit, 0);
         if (titleText) titleText.text = "Trash Collector";
     }
 
     public void StartRound()
     {
-        // wipe leftovers if any
+        // cleanup any leftovers
         CleanupAllItems();
+        collectedBySprite.Clear();
 
         collected = 0;
-        targetCount = Mathf.Max(0, initialItemCount);
+        targetCount = Mathf.Max(1, initialItemCount);
         timeLeft = timeLimit;
         running = true;
 
@@ -88,13 +93,26 @@ public class MiniGameManager : MonoBehaviour
         UpdateUI(collected, timeLeft, targetCount);
     }
 
+    // Called by ClickableItem.OnMouseDown() on the CURRENT target only
     public void OnItemCollected(ClickableItem clicked)
     {
         if (!running || clicked == null) return;
-        if (clicked != currentTarget) return; // only the highlighted one counts
+        if (clicked != currentTarget) return; // only highlighted one counts
+
+        // --- NEW: record sprite from this GO or any child so summary always works ---
+        Sprite sprite = null;
+        var sr = clicked.GetComponent<SpriteRenderer>();
+        if (!sr || !sr.sprite) sr = clicked.GetComponentInChildren<SpriteRenderer>(true);
+        if (sr) sprite = sr.sprite;
+
+        if (sprite)
+        {
+            collectedBySprite.TryGetValue(sprite, out var n);
+            collectedBySprite[sprite] = n + 1;
+        }
 
         collected++;
-        items.Remove(clicked); // ClickableItem destroys itself
+        items.Remove(clicked); // (ClickableItem destroys its own GO)
 
         if (collected >= targetCount || items.Count == 0)
         {
@@ -103,7 +121,7 @@ public class MiniGameManager : MonoBehaviour
         }
         else
         {
-            SetTarget(items[0]);
+            SetTarget(items[0]); // next in list (or randomize if you like)
         }
 
         UpdateUI(collected, timeLeft, targetCount);
@@ -111,33 +129,29 @@ public class MiniGameManager : MonoBehaviour
 
     void End(bool win)
     {
-        // remove anything left
+        // wipe anything left
         CleanupAllItems();
 
-        // set title to include final score
+        // final title + lock UI with summary
         if (titleText)
         {
-            if (win) titleText.text = $"You Win — Collected: {collected}/{targetCount}";
-            else     titleText.text = $"Game Over — Collected: {collected}/{targetCount}";
+            titleText.text = win
+                ? $"You Win — Collected: {collected}/{targetCount}"
+                : $"Game Over — Collected: {collected}/{targetCount}";
         }
 
-        // lock popup so Start is gone forever; show only Close
+        // show the summary list (sprite icon : count) and disable replay
         var popup = FindObjectOfType<MiniGamePopup>();
         if (popup)
         {
-            if (win) popup.ShowWin(collected, targetCount);
-            else     popup.ShowGameOver(collected, targetCount);
+            if (win) popup.ShowWinWithSummary(collectedBySprite, collected, targetCount);
+            else     popup.ShowGameOverWithSummary(collectedBySprite, collected, targetCount);
         }
     }
 
-    // ------- utilities -------
-    void CleanupAllItems()
-    {
-        foreach (var it in items)
-            if (it) Destroy(it.gameObject);
-        items.Clear();
-        currentTarget = null;
-    }
+    // ----------------- Spawning -----------------
+
+    enum Kind { Food, Trash, Collectible }
 
     void SpawnBatch(int count)
     {
@@ -150,18 +164,30 @@ public class MiniGameManager : MonoBehaviour
         var b = spawnBounds.bounds;
         var placed = new List<Vector2>();
 
+        // Plan kinds with guarantee: ≥1 collectible
+        var plannedKinds = new Kind[count];
+        int guaranteeIndex = Random.Range(0, count);
+        for (int i = 0; i < count; i++)
+            plannedKinds[i] = (i == guaranteeIndex) ? Kind.Collectible : WeightedKind();
+
         for (int i = 0; i < count; i++)
         {
-            GameObject prefab = ChoosePrefab();
+            // choose a prefab from the selected list
+            GameObject prefab = PickPrefab(plannedKinds[i]);
+            if (!prefab)
+            {
+                // graceful fallback if list empty
+                prefab = PickAnyAvailable();
+                if (!prefab) { Debug.LogError("[MiniGame] All prefab lists are empty."); return; }
+            }
+
+            // place with spacing
             Vector2 pos;
             int tries = 0;
-
             do
             {
-                pos = new Vector2(
-                    Random.Range(b.min.x, b.max.x),
-                    Random.Range(b.min.y, b.max.y)
-                );
+                pos = new Vector2(Random.Range(b.min.x, b.max.x),
+                                  Random.Range(b.min.y, b.max.y));
                 tries++;
             }
             while (tries < maxPlacementTries && TooClose(pos, placed, minSeparation));
@@ -170,20 +196,69 @@ public class MiniGameManager : MonoBehaviour
 
             var go = Instantiate(prefab, pos, Quaternion.identity);
 
+            // ensure it is clickable
             var ci = go.GetComponent<ClickableItem>();
             if (!ci) ci = go.AddComponent<ClickableItem>();
 
+            // --- NEW: if there's no collider, add one sized to a child SpriteRenderer if needed ---
             if (!go.TryGetComponent<Collider2D>(out _))
             {
-                var sr = go.GetComponent<SpriteRenderer>();
+                var anySR = go.GetComponentInChildren<SpriteRenderer>(true);
                 var box = go.AddComponent<BoxCollider2D>();
-                if (sr && sr.sprite) box.size = sr.sprite.bounds.size;
                 box.isTrigger = true;
+
+                if (anySR && anySR.sprite)
+                {
+                    // use world-space bounds then convert center to local space for offset
+                    var wsBounds = anySR.bounds;
+                    box.size   = wsBounds.size;                                      // assumes parent scale = 1 (common in UI-like 2D)
+                    box.offset = go.transform.InverseTransformPoint(wsBounds.center); // local center
+                }
             }
 
             items.Add(ci);
             SetNonTargetVisuals(ci);
         }
+    }
+
+    Kind WeightedKind()
+    {
+        // low chance collectibles by weight, but guarantee handled elsewhere
+        float total = foodWeight + trashWeight + collectibleWeight;
+        if (total <= 0f) return Kind.Food;
+
+        float r = Random.value * total;
+        if (r < foodWeight) return Kind.Food;
+        r -= foodWeight;
+        if (r < trashWeight) return Kind.Trash;
+        return Kind.Collectible;
+    }
+
+    GameObject PickPrefab(Kind k)
+    {
+        switch (k)
+        {
+            case Kind.Food:        return PickFrom(foodPrefabs);
+            case Kind.Trash:       return PickFrom(trashPrefabs);
+            case Kind.Collectible: return PickFrom(collectiblePrefabs);
+        }
+        return null;
+    }
+
+    GameObject PickAnyAvailable()
+    {
+        var list = new List<GameObject>();
+        list.AddRange(foodPrefabs);
+        list.AddRange(trashPrefabs);
+        list.AddRange(collectiblePrefabs);
+        return PickFrom(list);
+    }
+
+    static GameObject PickFrom(List<GameObject> list)
+    {
+        if (list == null || list.Count == 0) return null;
+        int i = Random.Range(0, list.Count);
+        return list[i];
     }
 
     bool TooClose(Vector2 p, List<Vector2> list, float minDist)
@@ -194,15 +269,7 @@ public class MiniGameManager : MonoBehaviour
         return false;
     }
 
-    GameObject ChoosePrefab()
-    {
-        float total = foodWeight + badWeight + collectibleWeight;
-        float r = Random.value * total;
-        if (r < foodWeight) return foodPrefab;
-        r -= foodWeight;
-        if (r < badWeight) return badPrefab;
-        return collectiblePrefab;
-    }
+    // ----------------- UI / visuals -----------------
 
     void UpdateUI(int collectedCount, float time, int total)
     {
@@ -210,7 +277,6 @@ public class MiniGameManager : MonoBehaviour
         if (timerText) timerText.text = $"Time: {Mathf.CeilToInt(time)}";
     }
 
-    // ------- target visuals -------
     void SetTarget(ClickableItem newTarget)
     {
         if (currentTarget) SetNonTargetVisuals(currentTarget);
@@ -229,7 +295,7 @@ public class MiniGameManager : MonoBehaviour
 
     void SetTargetVisuals(ClickableItem it)
     {
-        var sr = it.GetComponent<SpriteRenderer>();
+        var sr = it.GetComponentInChildren<SpriteRenderer>(true); // works if sprite is on child
         if (sr)
         {
             sr.color = targetColor;
@@ -240,12 +306,20 @@ public class MiniGameManager : MonoBehaviour
 
     void SetNonTargetVisuals(ClickableItem it)
     {
-        var sr = it.GetComponent<SpriteRenderer>();
+        var sr = it.GetComponentInChildren<SpriteRenderer>(true);
         if (sr)
         {
             sr.color = normalColor;
             sr.sortingOrder = normalSortingOrder;
         }
         it.transform.localScale = Vector3.one;
+    }
+
+    void CleanupAllItems()
+    {
+        foreach (var it in items)
+            if (it) Destroy(it.gameObject);
+        items.Clear();
+        currentTarget = null;
     }
 }
