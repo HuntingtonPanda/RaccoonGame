@@ -462,9 +462,7 @@ MonoBehaviour:
   fullPrefab: {fileID: 8180493893183651906, guid: 2f8cae21bd6b1864ca7c8e55b0901eed, type: 3}
   emptyPrefab: {fileID: 6609764822755213771, guid: dd1512bf59b065745b7277267dd4ed60, type: 3}
   NUM_BARS: 5
-  segmentSize: 28
-  spacing: 6
-  margin: {x: 16, y: 16}
+  MARGIN: {x: 16, y: 16}
   timePerBar: 5
   startOnAwake: 1
   autoResumeAfterRefill: 1

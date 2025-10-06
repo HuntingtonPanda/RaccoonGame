@@ -14,9 +14,9 @@ public class HungerBar : MonoBehaviour
 
     [Header("Bars")]
     [SerializeField] private int NUM_BARS = 5;          // total bars shown
-    [SerializeField] private float segmentSize = 28f;   // px size per bar
-    [SerializeField] private float spacing = 6f;
-    [SerializeField] private Vector2 margin = new Vector2(16, 16); // from bottom-left
+    [SerializeField] private const float SEGMENT_SIZE = 100f;   // px size per bar
+    [SerializeField] private const float SPACING = 12f;
+    [SerializeField] private Vector2 MARGIN = new Vector2(16, 16); // from bottom-left
 
     [Header("Timing")]
     [SerializeField] private float timePerBar = 5f;     // seconds to deplete 1 bar
@@ -85,10 +85,10 @@ public class HungerBar : MonoBehaviour
 
         _rootRT = (RectTransform)rootGO.transform;
         _rootRT.anchorMin = _rootRT.anchorMax = _rootRT.pivot = new Vector2(0, 0);
-        _rootRT.anchoredPosition = margin;
+        _rootRT.anchoredPosition = MARGIN;
 
         var layout = rootGO.AddComponent<HorizontalLayoutGroup>();
-        layout.spacing = spacing;
+        layout.spacing = SPACING;
         layout.childAlignment = TextAnchor.LowerLeft;
         layout.childControlHeight = layout.childControlWidth = false;
         layout.childForceExpandHeight = layout.childForceExpandWidth = false;
@@ -102,7 +102,7 @@ public class HungerBar : MonoBehaviour
     {
         var holder = new GameObject($"Bar_{segments.Count}", typeof(RectTransform));
         holder.transform.SetParent(parent, false);
-        ((RectTransform)holder.transform).sizeDelta = new Vector2(segmentSize, segmentSize);
+        ((RectTransform)holder.transform).sizeDelta = new Vector2(SEGMENT_SIZE, SEGMENT_SIZE);
 
         var full = Instantiate(fullPrefab, holder.transform).GetComponent<Image>();
         Stretch(full.rectTransform);
