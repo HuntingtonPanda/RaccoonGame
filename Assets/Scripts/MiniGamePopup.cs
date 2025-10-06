@@ -1,7 +1,5 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
 
 public class MiniGamePopup : MonoBehaviour
 {
@@ -20,10 +18,6 @@ public class MiniGamePopup : MonoBehaviour
     public Image popupBackdropImage;  // Image on MiniGamePopup
     public Image windowBackground;    // Image on Window
 
-    [Header("Summary UI (icon : count)")]
-    public RectTransform summaryListRoot;   // VerticalLayout container under Window
-    public GameObject summaryRowPrefab;     // Prefab with Image (icon) + TMP_Text (count)
-
     bool isOpen;
     bool lockedForever;
 
@@ -38,7 +32,6 @@ public class MiniGamePopup : MonoBehaviour
 
         SetPlayingUI(false);
         ShowLockedUIIfNeeded();
-        ClearSummary();
     }
 
     public void OpenPopup()
@@ -48,11 +41,12 @@ public class MiniGamePopup : MonoBehaviour
 
         if (popupRoot)  popupRoot.SetActive(true);
         if (windowRoot) windowRoot.SetActive(true);
+
+        // Show BG/world only if not locked
         if (miniGameRoot) miniGameRoot.SetActive(!lockedForever);
 
         SetPlayingUI(false);
         ShowLockedUIIfNeeded();
-        ClearSummary();
     }
 
     void StartMiniGame()
@@ -61,7 +55,6 @@ public class MiniGamePopup : MonoBehaviour
 
         if (miniGameRoot) miniGameRoot.SetActive(true);
         SetPlayingUI(true);
-        ClearSummary();
 
         var mgr = FindObjectOfType<MiniGameManager>();
         if (mgr) mgr.StartRound();
@@ -75,7 +68,6 @@ public class MiniGamePopup : MonoBehaviour
         if (popupRoot)  popupRoot.SetActive(false);
         isOpen = false;
         SetPlayingUI(false);
-        ClearSummary();
     }
 
     public void OnGameEnded()
@@ -84,24 +76,18 @@ public class MiniGamePopup : MonoBehaviour
         SetPlayingUI(false);
     }
 
-    // ---------- End views (Close-only, with summary) ----------
-    public void ShowWinWithSummary(Dictionary<Sprite,int> summary, int collected, int total)
+    // -------- End views (Close-only, no replay) --------
+    public void ShowWin(int collected, int total)
     {
         LockForever();
         FinalizeEndUI();
-        RenderSummary(summary);
     }
 
-    public void ShowGameOverWithSummary(Dictionary<Sprite,int> summary, int collected, int total)
+    public void ShowGameOver(int collected, int total)
     {
         LockForever();
         FinalizeEndUI();
-        RenderSummary(summary);
     }
-
-    // (keep these if other code still calls them)
-    public void ShowWin(int collected, int total)        { LockForever(); FinalizeEndUI(); }
-    public void ShowGameOver(int collected, int total)   { LockForever(); FinalizeEndUI(); }
 
     void FinalizeEndUI()
     {
@@ -149,50 +135,5 @@ public class MiniGamePopup : MonoBehaviour
             c.a = playing ? 0f : 0.30f;
             windowBackground.color = c;
         }
-
-        if (playing) ClearSummary();
-    }
-
-    // ---------- Summary rendering ----------
-    void RenderSummary(Dictionary<Sprite,int> summary)
-    {
-        if (!summaryListRoot || !summaryRowPrefab)
-        {
-            Debug.LogWarning("[MiniGamePopup] Assign summaryListRoot & summaryRowPrefab to show the summary.");
-            return;
-        }
-
-        ClearSummary();
-        summaryListRoot.gameObject.SetActive(true);
-
-        if (summary == null || summary.Count == 0)
-        {
-            var row = Instantiate(summaryRowPrefab, summaryListRoot);
-            var img = row.GetComponentInChildren<Image>(true);
-            var txt = row.GetComponentInChildren<TMP_Text>(true);
-            if (img) img.enabled = false;
-            if (txt) txt.text = "No items recorded";
-            return;
-        }
-
-        var ordered = new List<KeyValuePair<Sprite,int>>(summary);
-        ordered.Sort((a,b) => b.Value.CompareTo(a.Value));
-
-        foreach (var kv in ordered)
-        {
-            var row = Instantiate(summaryRowPrefab, summaryListRoot);
-            var img = row.GetComponentInChildren<Image>(true);
-            var txt = row.GetComponentInChildren<TMP_Text>(true);
-            if (img) { img.sprite = kv.Key; img.preserveAspect = true; img.enabled = true; }
-            if (txt) txt.text = $"× {kv.Value}";
-        }
-    }
-
-    void ClearSummary()
-    {
-        if (!summaryListRoot) return;
-        for (int i = summaryListRoot.childCount - 1; i >= 0; i--)
-            Destroy(summaryListRoot.GetChild(i).gameObject);
-        summaryListRoot.gameObject.SetActive(false);
     }
 }
