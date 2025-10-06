@@ -6,15 +6,15 @@ public class RandomSpawner : MonoBehaviour
     public GameObject trashcan;
 
     // World boundaries
-    const int xMin = -5;
-    const int xMax = 5;
-    const int yMin = -5;
-    const int yMax = 5;
+    const int xMin = -10;
+    const int xMax = 10;
+    const int yMin = -7;
+    const int yMax = 7;
 
     // Constants for control
     const int NUM_TRASHCANS = 10;               // How many trashcans to spawn
     const float TRASHCAN_SIZE = 1.0f;           // Size of each trashcan
-    const float MIN_DISTANCE_MULTIPLIER = 2.5f; // Spacing factor (buffer between cans)
+    const float MIN_DISTANCE_MULTIPLIER = 4f; // Spacing factor (buffer between cans)
 
     List<Vector2> spawnedPositions = new List<Vector2>();
 
